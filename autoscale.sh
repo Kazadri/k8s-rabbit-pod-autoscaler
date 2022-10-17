@@ -34,13 +34,17 @@ IFS=';' read -ra autoscalingArr <<< "$autoscalingNoWS"
 while true; do
   for autoscaler in "${autoscalingArr[@]}"; do
     IFS='|' read minPods maxPods mesgPerPod namespace deployment queueName <<< "$autoscaler"
+    arrQueueName=$(echo "$queuesName" | tr "," "\n")
+    totalQueueMessages=0
 
-    queueMessagesJson=$(curl -s -S --retry 3 --retry-delay 3 -u "$RABBIT_USER:$RABBIT_PASS" \
-      $RABBIT_HOST:15672/api/queues/%2f/$queueName)
+    for queueName in $arrQueueName; do
+        IFS=':' read name weight <<< "$queueName"
+        queueMessagesJson=$(curl -s -S --retry 3 --retry-delay 3 -u "$RABBIT_USER:$RABBIT_PASS" "$RABBIT_HOST":15672/api/queues/%2f/"$name")
+        totalQueueMessages=$((totalQueueMessages+($(echo "$queueMessagesJson" | jq '.messages') * weight)))
+    done
 
     if [[ $? -eq 0 ]]; then
-      queueMessages=$(echo $queueMessagesJson | jq '.messages')
-      requiredPods=$(echo "$queueMessages/$mesgPerPod" | bc 2> /dev/null)
+      requiredPods=$(echo "$totalQueueMessages/$mesgPerPod" | bc 2> /dev/null)
 
       if [[ $requiredPods != "" ]]; then
         currentPods=$(getCurrentPods)
